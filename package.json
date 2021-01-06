@@ -27,9 +27,20 @@
     "tool"
   ],
   "dependencies": {
-    "babylon": "^6.8.0",
-    "commander": "^2.9.0",
-    "lodash": "^4.13.1",
-    "pretty-tree": "surreal9/pretty-tree"
+    "@babel/parser": "^7.12.11",
+    "@babel/polyfill": "^7.12.1",
+    "@babel/traverse": "^7.12.12",
+    "babel": "^6.23.0",
+    "babel-core": "^6.26.3",
+    "babylon": "^6.18.0",
+    "commander": "^2.20.3",
+    "lodash": "^4.17.20",
+    "pretty-tree": "github:surreal9/pretty-tree",
+    "recast": "^0.20.4"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.12.10",
+    "@babel/core": "^7.12.10",
+    "@babel/preset-env": "^7.12.11"
   }
 }

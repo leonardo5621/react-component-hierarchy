@@ -3,6 +3,8 @@
 'use strict'; // eslint-disable-line
 const program = require('commander');
 const path = require('path');
+const traverse = require('@babel/traverse').default;
+const parser = require('@babel/parser');
 const babylon = require('babylon');
 const readFileSync = require('fs').readFileSync;
 const _ = require('lodash');
@@ -37,49 +39,20 @@ const rootNode = {
   depth: 0,
   children: [],
 };
-console.log(rootNode);
 
-function extractModules(bodyItem) {
-  if (
-    bodyItem.type === 'ImportDeclaration' &&
-    !bodyItem.source.value.endsWith('css')
-  ) {
-    // There may be more than one import in the declaration
-    return bodyItem.specifiers.map(specifier => ({
-      name: specifier.local.name,
-      source: bodyItem.source.value,
-    }));
+
+const ImportVisitor = {
+  ImportDeclaration(path){
+    this.imports.push({name: path.node.specifiers.local.name, 
+                      source: path.node.source.value});
+  },
+};
+
+const RenderVisitor = {
+  JSXElement(path){
+      this.usedElements.push(path.node.openingElement.name.name);
   }
-  return null;
-}
-
-function extractChildComponents(tokens, imports) {
-  const childComponents = [];
-  let childComponent;
-  for (var i = 0; i < tokens.length - 1; i++) {
-    if (
-      tokens[i].type.label === 'jsxTagStart' &&
-      tokens[i + 1].type.label === 'jsxName'
-    ) {
-      childComponent = _.find(imports, { name: tokens[i + 1].value });
-      if (childComponent) {
-        childComponents.push(childComponent);
-      }
-    } else if (
-      tokens[i].type.label === 'jsxName' &&
-      tokens[i].value === 'component'
-    ) {
-      // Find use of components in react-router, e.g. `<Route component={...}>`
-      childComponent = _.find(imports, { name: tokens[i + 3].value });
-      if (childComponent) {
-        childComponents.push(childComponent);
-      }
-    }
-  }
-  return childComponents;
-}
-
-
+};
 
 function formatChild(child, parent, depth) {
   let fileName;
@@ -162,13 +135,12 @@ function findContainerChild(node, body, imports, depth) {
 }
 
 function processFile(node, file, depth, filename) {
-  const ast = babylon.parse(file, {
+  const ast = parser.parse(file, {
     sourceType: 'module',
     plugins: [
       'asyncGenerators',
       'classProperties',
       'classProperties',
-      'decorators',
       'dynamicImport',
       'exportExtensions',
       'flow',
@@ -178,30 +150,38 @@ function processFile(node, file, depth, filename) {
       'objectRestSpread',
     ],
   });
-
   // Get a list of imports and try to figure out which are child components
   let imports = [];
-  for (const i of ast.program.body.map(extractModules)) {
-    if (!!i) {
-      imports = imports.concat(i);
-    }
+  let foundElements = [];
+  // for (const i of ast.program.body.map(extractModules)) {
+  //   if (!!i) {
+  //     imports = imports.concat(i);
+  //   }
     
-  }
-  //console.log(imports)
+  // }
+
   if(filename === "/home/leonardo/hopiaNewRep/hopia/src/containers/Desiderata.js"){
     console.log(imports);
   }
-  if (_.find(imports, { name: 'React' })) {
-    // Look for children in the JSX
-    let childs = extractChildComponents(ast.tokens, imports);
-    console.log(childs);
-    console.log("Aqui");
-    const childComponents = _.uniq(childs);
-    node.children = childComponents.map(c => formatChild(c, node, depth));
-  } else {
-    // Not JSX.. try to search for a wrapped component
-    node.children = findContainerChild(node, ast.program.body, imports, depth);
+
+  traverse(ast,{
+    ImportDeclaration(path){
+      //Il faut gérer les autres cas aussi...
+      if(path.node.specifiers.length === 1){
+        imports.push({name: path.node.specifiers[0].local.name, 
+          source: path.node.source.value});
+      }     
+    },
+    JSXElement(path){
+      foundElements.push(path.node.openingElement.name.name);
   }
+  },);
+  imports = _.uniq(imports);
+  foundElements = _.uniq(foundElements);
+  let usedImports = imports.filter((pkg) => foundElements.includes(pkg.name));
+  
+  node.children = usedImports.map(c => formatChild(c, node, depth));
+  //console.log(node.children);
 }
 
 function formatNodeToPrettyTree(node) {
@@ -253,8 +233,10 @@ function done() {
     );
     process.exit(1);
   }
-  console.log(rootNode);
-  console.log(tree(formatNodeToPrettyTree(rootNode)));
+  //console.log(rootNode);
+  let newNode = formatNodeToPrettyTree(rootNode);
+  //console.log(newNode);
+  console.log(tree(newNode));
   process.exit();
 }
 
@@ -277,13 +259,13 @@ function processNode(node, depth, parent) {
 
   let possibleFiles = getPossibleNames(node.filename);
 
-  if (parent && moduleDir) {
-    const baseName = node.filename.replace(
-      path.dirname(parent.filename),
-      moduleDir
-    );
-    possibleFiles = possibleFiles.concat(getPossibleNames(baseName));
-  }
+  // if (parent && moduleDir) {
+  //   const baseName = node.filename.replace(
+  //     path.dirname(parent.filename),
+  //     moduleDir
+  //   );
+  //   possibleFiles = possibleFiles.concat(getPossibleNames(baseName));
+  // }
 
   //console.log(possibleFiles);
   for (const name of possibleFiles) {
