@@ -9,6 +9,7 @@ const babylon = require('babylon');
 const readFileSync = require('fs').readFileSync;
 const _ = require('lodash');
 const tree = require('pretty-tree');
+const constants = require('./constants');
 
 program
   .version('1.1.0')
@@ -31,7 +32,6 @@ const moduleDir = program.moduleDir;
 const hideThirdParty = program.hideThirdParty;
 
 const filename = path.resolve(program.args[0]);
-console.log(filename);
 
 const rootNode = {
   name: path.basename(filename).replace(/\.jsx?/, ''),
@@ -49,12 +49,36 @@ const ImportVisitor = {
 };
 
 const RenderVisitor = {
-  JSXElement(path){
-      this.usedElements.push(path.node.openingElement.name.name);
+  JSXElement(innerPath){
+    const tagName = innerPath.node.openingElement.name.name
+    if(tagsFilter(tagName, this.imports)){
+      let tag = {name: tagName, source: this.imports[tagName]};
+      tag = formatChild(tag, this.node, this.depth);
+      this.tag.children.push(tag);
+    } else {
+      innerPath.skip();
+    }
+
   }
 };
 
-function formatChild(child, parent, depth) {
+const tagsFilter = (tag, importsList) => {
+  if( !(constants.routerTags.includes(tag) || constants.jsxTags.includes(tag)) ) {
+    if( importsList[tag] ){
+      return true;
+    } else{
+      return false;
+    }
+  } else {
+    return false;
+  }
+}
+
+const childrenFilter = (childrenList) => {
+  return childrenList.filter((child) => child.type === "JSXElement");
+}
+
+function formatChild(child, parent, depth, children) {
   let fileName;
   let source;
 
@@ -70,7 +94,7 @@ function formatChild(child, parent, depth) {
     source,
     name: child.name,
     filename: fileName,
-    children: [],
+    children: children? children : [],
     depth,
   };
 }
@@ -150,39 +174,52 @@ function processFile(node, file, depth, filename) {
       'objectRestSpread',
     ],
   });
-  // Get a list of imports and try to figure out which are child components
-  let imports = [];
-  let foundElements = [];
-  // for (const i of ast.program.body.map(extractModules)) {
-  //   if (!!i) {
-  //     imports = imports.concat(i);
-  //   }
-    
-  // }
 
-  if(filename === "/home/leonardo/hopiaNewRep/hopia/src/containers/Desiderata.js"){
-    console.log(imports);
-  }
+  if(node.children.length !== 0 ){
+    node.children.forEach(c => processNode(c, depth + 1, node));
+  } else {
+    // Get a list of imports and try to figure out which are child components
+  let imports = {};
+  let foundElements = [];
 
   traverse(ast,{
     ImportDeclaration(path){
       //Il faut gérer les autres cas aussi...
       if(path.node.specifiers.length === 1){
-        imports.push({name: path.node.specifiers[0].local.name, 
-          source: path.node.source.value});
+        // imports.push({name: path.node.specifiers[0].local.name, 
+        //   source: path.node.source.value});
+          imports[path.node.specifiers[0].local.name] = path.node.source.value;
       }     
     },
     JSXElement(path){
-      foundElements.push(path.node.openingElement.name.name);
-  }
+      const tagName = path.node.openingElement.name.name;
+      if(tagsFilter(tagName, imports)){
+        let tag = {name: tagName, source: imports[tagName]};
+        tag = formatChild(tag, node, depth);
+        path.traverse(RenderVisitor, { node, tag, imports, depth: depth+1} )
+        foundElements.push(tag);
+        path.stop();
+      }
+      //foundElements.push(path.node.openingElement.name.name);
+    }
   },);
   imports = _.uniq(imports);
-  foundElements = _.uniq(foundElements);
-  let usedImports = imports.filter((pkg) => foundElements.includes(pkg.name));
   
-  node.children = usedImports.map(c => formatChild(c, node, depth));
+  // foundElements = foundElements.filter((tag) => {
+  //   if(constants.routerTags.includes(tag.name) || constants.htmlJsxTags.includes(tag.name)){
+  //     return false;
+  //   } else {
+  //     return true;
+  //   }
+  // })
+  //let usedImports = imports.filter((pkg) => foundElements.includes(pkg.name));
+  //node.children = usedImports.map(c => formatChild(c, node, depth));
+  node.children = foundElements;
   //console.log(node.children);
+  }
+  
 }
+
 
 function formatNodeToPrettyTree(node) {
   if (hideContainers && node.name.indexOf('Container') > -1) {
@@ -233,9 +270,8 @@ function done() {
     );
     process.exit(1);
   }
-  //console.log(rootNode);
+
   let newNode = formatNodeToPrettyTree(rootNode);
-  //console.log(newNode);
   console.log(tree(newNode));
   process.exit();
 }
@@ -259,15 +295,14 @@ function processNode(node, depth, parent) {
 
   let possibleFiles = getPossibleNames(node.filename);
 
-  // if (parent && moduleDir) {
-  //   const baseName = node.filename.replace(
-  //     path.dirname(parent.filename),
-  //     moduleDir
-  //   );
-  //   possibleFiles = possibleFiles.concat(getPossibleNames(baseName));
-  // }
+  if (parent && moduleDir) {
+    const baseName = node.filename.replace(
+      path.dirname(parent.filename),
+      moduleDir
+    );
+    possibleFiles = possibleFiles.concat(getPossibleNames(baseName));
+  }
 
-  //console.log(possibleFiles);
   for (const name of possibleFiles) {
     node.filename = name;
     try {
@@ -275,7 +310,11 @@ function processNode(node, depth, parent) {
       processFile(node, file, depth, node.filename);
       node.children.forEach(c => processNode(c, depth + 1, node));
       return;
-    } catch (e) {}
+    } catch (e) {
+      if( !(e.code === 'ENOENT') ){
+        console.log(e);
+      }
+    }
   }
 
   if (hideThirdParty) {

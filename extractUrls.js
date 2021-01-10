@@ -38,7 +38,7 @@ traverse(ast, {
     JSXOpeningElement(path){
       if (path.node.name.name === "Router") {
         let filteredAttr = path.node.attributes.filter((attr) => attr.name.name === "basename");
-        urlNodes.Base = filteredAttr[0]["value"]["expression"]["value"];
+        urlNodes.Base = filteredAttr[0]["value"]["value"];
       }
     },
     JSXElement(path) {    
